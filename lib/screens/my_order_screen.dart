@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -17,24 +16,31 @@ class MyOrdersScreen extends StatefulWidget {
   _MyOrdersScreenState createState() => _MyOrdersScreenState();
 }
 
-class _MyOrdersScreenState extends State<MyOrdersScreen> {
+class _MyOrdersScreenState extends State<MyOrdersScreen>
+    with SingleTickerProviderStateMixin {
   List<Order> _orders = [];
   bool _isLoading = true;
   String? _errorMessage;
-  Timer? _pollingTimer;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
     _fetchOrders();
-    _pollingTimer = Timer.periodic(Duration(seconds: 10), (timer) {
-      _fetchOrders();
-    });
+
+    _animationController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 500),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
+    );
   }
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
+    _animationController.dispose();
     super.dispose();
   }
 
@@ -55,6 +61,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
           _orders.insert(0, widget.newOrder!);
         }
         _isLoading = false;
+        _animationController.forward(from: 0);
       });
     } catch (e) {
       print('Error fetching orders: $e');
@@ -74,15 +81,8 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       await OrderService().cancelOrder(authService.token!, orderId);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Order #$orderId cancelled successfully'),
-              Icon(Icons.check_circle, color: Colors.white),
-            ],
-          ),
+          content: Text('Order cancelled successfully'),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
         ),
       );
       await _fetchOrders();
@@ -112,6 +112,31 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to request return: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteOrder(int orderId) async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    try {
+      print(
+        'Attempting to delete order $orderId with token: ${authService.token}',
+      );
+      await OrderService().deleteOrder(authService.token!, orderId);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Order deleted successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      await _fetchOrders();
+    } catch (e) {
+      print('Failed to delete order: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete order: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -189,8 +214,25 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     bool isNewOrder,
     String normalizedStatus,
   ) {
-    Color statusColor = _getStatusColor(normalizedStatus);
-    String statusText = _getStatusText(normalizedStatus);
+    String statusMessage = _getStatusMessage(normalizedStatus);
+
+    double subtotal = order.items.fold(
+      0.0,
+      (sum, item) => sum + (item.price * 0.9 * item.quantity),
+    );
+    double deliveryCharge = 0;
+    double originalDeliveryCharge = 0;
+    if (subtotal < 100) {
+      deliveryCharge = 50;
+      originalDeliveryCharge = 50;
+    } else if (subtotal < 300) {
+      deliveryCharge = 30;
+      originalDeliveryCharge = 30;
+    } else {
+      deliveryCharge = 0;
+      originalDeliveryCharge = 30;
+    }
+    double totalPrice = subtotal + deliveryCharge;
 
     return Card(
       elevation: 4,
@@ -200,177 +242,387 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         side:
             isNewOrder
                 ? BorderSide(color: Colors.green.shade700, width: 2)
-                : BorderSide(color: statusColor.withOpacity(0.5), width: 1),
+                : BorderSide.none,
       ),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        childrenPadding: EdgeInsets.all(16),
-        leading: Icon(Icons.local_mall, color: statusColor, size: 30),
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Order #${order.id}',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-            Text(
-              DateFormat('dd MMM yyyy').format(order.createdAt),
-              style: TextStyle(fontSize: 14, color: Colors.black54),
-            ),
-          ],
-        ),
-        subtitle: Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Row(
+      color:
+          Colors.white, // Ensure card background is white to avoid black lines
+      child: Theme(
+        data: Theme.of(
+          context,
+        ).copyWith(dividerColor: Colors.transparent), // Remove default divider
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          childrenPadding: EdgeInsets.all(16),
+          leading: Icon(
+            Icons.local_mall,
+            color: _getStatusColor(normalizedStatus),
+            size: 30,
+          ),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: statusColor, width: 1),
+              Text(
+                'Order #${order.id}',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
                 ),
-                child: Text(
-                  statusText,
+              ),
+              Text(
+                DateFormat('dd MMM yyyy').format(order.createdAt),
+                style: TextStyle(fontSize: 14, color: Colors.black54),
+              ),
+            ],
+          ),
+          subtitle: Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Text(
+                  statusMessage,
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: statusColor,
+                    color: _getStatusColor(normalizedStatus),
                   ),
                 ),
+              ],
+            ),
+          ),
+          children: [
+            Divider(
+              color: Colors.grey.shade300,
+              thickness: 1,
+            ), // Custom divider with light color
+            _buildStatusTimeline(order, normalizedStatus),
+            SizedBox(height: 16),
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
-            ],
-          ),
-        ),
-        children: [
-          Divider(),
-          _buildStatusTimeline(normalizedStatus),
-          SizedBox(height: 16),
-          Text(
-            'Total: ₹${order.totalAmount.toStringAsFixed(0)}',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.green.shade700,
+              color: Colors.white, // Ensure card background is white
+              child: Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Order Summary',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    SizedBox(
+                      height: order.items.length == 1 ? 120.0 : 240.0,
+                      child: ListView.builder(
+                        physics: ClampingScrollPhysics(),
+                        itemCount: order.items.length,
+                        itemBuilder: (context, index) {
+                          final item = order.items[index];
+                          final double itemTotal =
+                              item.price * 0.9 * item.quantity;
+                          return Card(
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            color:
+                                Colors.white, // Ensure card background is white
+                            child: Padding(
+                              padding: EdgeInsets.all(12.0),
+                              child: Row(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child:
+                                        item.imageUrl != null &&
+                                                item.imageUrl!.isNotEmpty
+                                            ? Image.network(
+                                              item.imageUrl!,
+                                              width: 80,
+                                              height: 80,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (
+                                                context,
+                                                error,
+                                                stackTrace,
+                                              ) {
+                                                return Container(
+                                                  width: 80,
+                                                  height: 80,
+                                                  color: Colors.grey.shade200,
+                                                  child: Icon(
+                                                    Icons.error,
+                                                    size: 40,
+                                                    color: Colors.grey,
+                                                  ),
+                                                );
+                                              },
+                                            )
+                                            : Container(
+                                              width: 80,
+                                              height: 80,
+                                              color: Colors.grey.shade200,
+                                              child: Icon(
+                                                Icons.image,
+                                                size: 40,
+                                                color: Colors.grey,
+                                              ),
+                                            ),
+                                  ),
+                                  SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.name,
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          'Quantity: ${item.quantity}',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.black54,
+                                          ),
+                                        ),
+                                        SizedBox(height: 4),
+                                        Text(
+                                          'Total: ₹${itemTotal.toStringAsFixed(0)}',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green.shade700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Subtotal:',
+                          style: TextStyle(fontSize: 14, color: Colors.black54),
+                        ),
+                        Text(
+                          '₹${subtotal.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Delivery Charge:',
+                          style: TextStyle(fontSize: 14, color: Colors.black54),
+                        ),
+                        Row(
+                          children: [
+                            if (deliveryCharge == 0 && subtotal >= 300)
+                              Text(
+                                '₹$originalDeliveryCharge',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                            SizedBox(width: 4),
+                            Text(
+                              deliveryCharge == 0
+                                  ? 'Free Delivery ₹0'
+                                  : '₹${deliveryCharge.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color:
+                                    deliveryCharge == 0
+                                        ? Colors.green.shade700
+                                        : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    Divider(
+                      color: Colors.grey.shade300,
+                      thickness: 1,
+                    ), // Custom divider with light color
+                    SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Total Price:',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        Text(
+                          '₹${totalPrice.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-          SizedBox(height: 16),
-          Text(
-            'Shipping Address:',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
+            SizedBox(height: 16),
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              color: Colors.white, // Ensure card background is white
+              child: Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Shipping Address',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      order.shippingAddress.street == 'N/A' &&
+                              order.shippingAddress.city == 'N/A' &&
+                              order.shippingAddress.state == 'N/A' &&
+                              order.shippingAddress.postalCode == 'N/A' &&
+                              order.shippingAddress.country == 'N/A'
+                          ? 'Address not available'
+                          : '${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.postalCode}, ${order.shippingAddress.country}',
+                      style: TextStyle(fontSize: 14, color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            '${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.postalCode}, ${order.shippingAddress.country}',
-            style: TextStyle(fontSize: 14, color: Colors.black54),
-          ),
-          SizedBox(height: 16),
-          Text(
-            'Items:',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-          SizedBox(height: 8),
-          ...order.items.map(
-            (item) => Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle, size: 20, color: Colors.grey),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${item.quantity}x ${item.name}',
-                      style: TextStyle(fontSize: 14, color: Colors.black87),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (normalizedStatus == 'ORDER_PLACED' ||
+                    normalizedStatus == 'SHIPPED')
+                  ElevatedButton.icon(
+                    onPressed: () => _cancelOrder(order.id!),
+                    icon: Icon(Icons.cancel, size: 18),
+                    label: Text('Cancel Order'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade100,
+                      foregroundColor: Colors.red,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                     ),
                   ),
-                  Text(
-                    '₹${(item.price * item.quantity).toStringAsFixed(0)}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black54,
+                SizedBox(width: 8),
+                if (normalizedStatus == 'DELIVERED' ||
+                    normalizedStatus == 'CANCELLED') ...[
+                  ElevatedButton.icon(
+                    onPressed:
+                        normalizedStatus == 'DELIVERED'
+                            ? () => _requestReturn(order.id!)
+                            : null,
+                    icon: Icon(Icons.undo, size: 18),
+                    label: Text('Request Return'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade100,
+                      foregroundColor: Colors.blue.shade600,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      disabledForegroundColor: Colors.grey,
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () => _deleteOrder(order.id!),
+                    icon: Icon(Icons.delete, size: 18),
+                    label: Text('Delete Order'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey.shade200,
+                      foregroundColor: Colors.black54,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
-          ),
-          SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              if (normalizedStatus == 'PENDING' ||
-                  normalizedStatus == 'SHIPPED')
-                ElevatedButton.icon(
-                  onPressed: () => _cancelOrder(order.id!),
-                  icon: Icon(Icons.cancel, size: 18),
-                  label: Text('Cancel Order'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.shade100,
-                    foregroundColor: Colors.red,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                  ),
-                ),
-              if (normalizedStatus == 'DELIVERED')
-                ElevatedButton.icon(
-                  onPressed: () => _requestReturn(order.id!),
-                  icon: Icon(Icons.undo, size: 18),
-                  label: Text('Request Return'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade100,
-                    foregroundColor: Colors.blue.shade600,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildStatusTimeline(String status) {
-    final List<String> stages = [
-      'PENDING',
+  Widget _buildStatusTimeline(Order order, String currentStatus) {
+    final List<String> allStatuses = [
+      'ORDER_PLACED',
       'PROCESSING',
       'OUT_FOR_DELIVERY',
       'SHIPPED',
       'DELIVERED',
     ];
-    final List<String> stageLabels = [
-      'Order Placed',
-      'Processing',
-      'Out for Delivery',
-      'Shipped',
-      'Delivered',
-    ];
-    int currentIndex = stages.indexOf(status);
 
-    if (status == 'CANCELLED' || status == 'RETURNED') {
-      currentIndex = stages.length - 1;
-    }
+    final Map<String, String> stageLabels = {
+      'ORDER_PLACED': 'Order Placed',
+      'PROCESSING': 'Processing',
+      'OUT_FOR_DELIVERY': 'Out for Delivery',
+      'SHIPPED': 'Shipped',
+      'DELIVERED': 'Delivered',
+    };
+
+    final List<StatusHistory> history = order.statusHistory.reversed.toList();
+    final Set<String> completedStatuses =
+        history.map((h) => h.status.toUpperCase()).toSet();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Order Status',
+          'Order Status History',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
@@ -378,83 +630,113 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
           ),
         ),
         SizedBox(height: 16),
-        Column(
-          children: List.generate(stages.length, (index) {
-            return TimelineTile(
-              alignment: TimelineAlign.start,
-              isFirst: index == 0,
-              isLast: index == stages.length - 1,
-              indicatorStyle: IndicatorStyle(
-                width: 20,
-                height: 20,
-                color:
-                    index <= currentIndex
-                        ? _getStatusColor(status)
-                        : Colors.grey.shade300,
-                iconStyle:
-                    index <= currentIndex
-                        ? IconStyle(iconData: Icons.check, color: Colors.white)
-                        : null,
-              ),
-              beforeLineStyle: LineStyle(
-                thickness: 2,
-                color:
-                    index <= currentIndex
-                        ? _getStatusColor(status)
-                        : Colors.grey.shade300,
-              ),
-              afterLineStyle: LineStyle(
-                thickness: 2,
-                color:
-                    index < currentIndex
-                        ? _getStatusColor(status)
-                        : Colors.grey.shade300,
-              ),
-              endChild: Padding(
-                padding: EdgeInsets.only(left: 16, top: 8),
-                child: Text(
-                  stageLabels[index],
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: index <= currentIndex ? Colors.black87 : Colors.grey,
-                    fontWeight:
-                        index <= currentIndex
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                  ),
-                ),
-              ),
-            );
-          }),
+        FadeTransition(
+          opacity: _fadeAnimation,
+          child: Column(
+            children:
+                allStatuses.map((status) {
+                  final isCompleted = completedStatuses.contains(status);
+                  final matchingHistory = history.firstWhere(
+                    (h) => h.status.toUpperCase() == status,
+                    orElse:
+                        () => StatusHistory(
+                          status: status,
+                          timestamp: order.createdAt,
+                        ),
+                  );
+                  final isLast = status == currentStatus;
+
+                  return TimelineTile(
+                    alignment: TimelineAlign.start,
+                    isFirst: status == allStatuses.first,
+                    isLast: status == allStatuses.last,
+                    indicatorStyle: IndicatorStyle(
+                      width: 20,
+                      height: 20,
+                      color:
+                          isCompleted
+                              ? _getStatusColor(status)
+                              : Colors.grey.shade300,
+                      iconStyle:
+                          isCompleted
+                              ? IconStyle(
+                                iconData: Icons.check,
+                                color: Colors.white,
+                              )
+                              : null,
+                    ),
+                    beforeLineStyle: LineStyle(
+                      thickness: 2,
+                      color:
+                          isCompleted ||
+                                  (allStatuses.indexOf(status) <
+                                      allStatuses.indexOf(currentStatus))
+                              ? _getStatusColor(status)
+                              : Colors.grey.shade300,
+                    ),
+                    afterLineStyle: LineStyle(
+                      thickness: 2,
+                      color:
+                          isCompleted ||
+                                  (allStatuses.indexOf(status) <=
+                                      allStatuses.indexOf(currentStatus))
+                              ? _getStatusColor(status)
+                              : Colors.grey.shade300,
+                    ),
+                    endChild: Padding(
+                      padding: EdgeInsets.only(left: 16, top: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            stageLabels[status] ?? status,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: isCompleted ? Colors.black87 : Colors.grey,
+                              fontWeight:
+                                  isLast ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            DateFormat(
+                              'dd MMM yyyy, hh:mm a',
+                            ).format(matchingHistory.timestamp),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isCompleted ? Colors.black54 : Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+          ),
         ),
       ],
     );
   }
 
-  String _getStatusText(String status) {
+  String _getStatusMessage(String status) {
     switch (status) {
       case 'DELIVERED':
-        return 'Delivered';
+        return 'Order Completed and Delivered';
       case 'CANCELLED':
-        return 'Cancelled';
+        return 'Order Cancelled';
       case 'RETURNED':
-        return 'Returned';
-      case 'PENDING':
-        return 'Pending';
-      case 'PROCESSING':
-        return 'Processing';
-      case 'OUT_FOR_DELIVERY':
-        return 'Out for Delivery';
+        return 'Order Returned';
+      case 'ORDER_PLACED':
       case 'SHIPPED':
-        return 'Shipped';
+        return 'Order can be Cancelled';
       default:
-        return status;
+        return 'Order in Progress: $status';
     }
   }
 
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'PENDING':
+      case 'ORDER_PLACED':
         return Colors.orange;
       case 'PROCESSING':
         return Colors.blueAccent;

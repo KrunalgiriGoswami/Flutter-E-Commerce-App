@@ -3,8 +3,7 @@ import 'package:http/http.dart' as http;
 import '../models/order.dart';
 
 class OrderService {
-  static const String baseUrl =
-      'http://10.0.2.2:8080'; // Default for emulator; adjust for physical device
+  static const String baseUrl = 'http://10.0.2.2:8080';
 
   Future<List<Order>> fetchUserOrders(String token) async {
     print('Making request to fetch user orders...');
@@ -63,6 +62,26 @@ class OrderService {
     if (response.statusCode != 200) {
       throw Exception(
         'Failed to request return: ${response.statusCode} - ${response.body}',
+      );
+    }
+  }
+
+  Future<void> deleteOrder(String token, int orderId) async {
+    print('Attempting to delete order $orderId with token: $token');
+    final response = await http.delete(
+      Uri.parse('$baseUrl/api/orders/$orderId'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    );
+
+    print('Delete Order Response Status: ${response.statusCode}');
+    print('Delete Order Response Body: ${response.body}');
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to delete order: ${response.statusCode} - ${response.body}',
       );
     }
   }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../models/product.dart';
 import '../services/auth_service.dart';
+import '../providers/address_provider.dart';
 
 class CartProvider with ChangeNotifier {
   final Map<Product, int> _cartItems = {};
@@ -81,7 +83,6 @@ class CartProvider with ChangeNotifier {
               print(
                 'Failed to fetch product $productId: Status ${productResponse.statusCode}, Body ${productResponse.body}',
               );
-              // Optionally handle missing products (e.g., placeholder)
               final placeholderProduct = Product(
                 id: productId,
                 name: 'Product Not Found (ID: $productId)',
@@ -94,7 +95,6 @@ class CartProvider with ChangeNotifier {
             }
           } catch (e) {
             print('Error fetching product $productId: $e');
-            // Handle network errors or other issues
             final placeholderProduct = Product(
               id: productId,
               name: 'Error Loading Product (ID: $productId)',
@@ -274,7 +274,7 @@ class CartProvider with ChangeNotifier {
     }
   }
 
-  Future<void> checkout() async {
+  Future<void> checkout(BuildContext context) async {
     final token = _authService?.token;
     if (token == null || _authService == null) {
       throw Exception('User not authenticated');
@@ -285,21 +285,38 @@ class CartProvider with ChangeNotifier {
     }
 
     try {
-      // Prepare the order data
+      final addressProvider = Provider.of<AddressProvider>(
+        context,
+        listen: false,
+      );
+      final selectedAddress = addressProvider.selectedShippingAddress;
+      if (selectedAddress == null) {
+        throw Exception('No shipping address selected');
+      }
+
       final orderItems =
           _cartItems.entries.map((entry) {
             return {
               'productId': entry.key.id,
               'quantity': entry.value,
-              'price': entry.key.price * 0.9, // Apply 10% discount
+              'price': entry.key.price * 0.9,
+              'imageUrl': entry.key.imageUrl,
             };
           }).toList();
 
-      final orderData = {'totalPrice': getTotalPrice(), 'items': orderItems};
+      final orderData = {
+        'totalPrice': getTotalPrice(),
+        'items': orderItems,
+        'shippingAddress': {
+          'street': selectedAddress.street,
+          'city': selectedAddress.city,
+          'state': selectedAddress.state,
+          'postalCode': selectedAddress.postalCode,
+        },
+      };
 
       print('Sending checkout request with data: $orderData');
 
-      // Send checkout request to backend
       final response = await http.post(
         Uri.parse('${_authService!.baseUrl}/api/orders/create'),
         headers: {
@@ -313,7 +330,6 @@ class CartProvider with ChangeNotifier {
       print('Checkout Response Body: ${response.body}');
 
       if (response.statusCode == 200) {
-        // Clear the cart after successful checkout
         await clearCart();
         print('Checkout successful, cart cleared');
       } else {
@@ -325,30 +341,48 @@ class CartProvider with ChangeNotifier {
     }
   }
 
-  Future<void> checkoutSingleProduct(Product product, int quantity) async {
+  Future<void> checkoutSingleProduct(
+    BuildContext context,
+    Product product,
+    int quantity,
+  ) async {
     final token = _authService?.token;
     if (token == null || _authService == null) {
       throw Exception('User not authenticated');
     }
 
     try {
-      // Prepare the order data for a single product
+      final addressProvider = Provider.of<AddressProvider>(
+        context,
+        listen: false,
+      );
+      final selectedAddress = addressProvider.selectedShippingAddress;
+      if (selectedAddress == null) {
+        throw Exception('No shipping address selected');
+      }
+
       final orderItems = [
         {
           'productId': product.id,
           'quantity': quantity,
-          'price': product.price * 0.9, // Apply 10% discount
+          'price': product.price * 0.9,
+          'imageUrl': product.imageUrl,
         },
       ];
 
       final orderData = {
         'totalPrice': product.price * 0.9 * quantity,
         'items': orderItems,
+        'shippingAddress': {
+          'street': selectedAddress.street,
+          'city': selectedAddress.city,
+          'state': selectedAddress.state,
+          'postalCode': selectedAddress.postalCode,
+        },
       };
 
       print('Sending single product checkout request with data: $orderData');
 
-      // Send checkout request to backend
       final response = await http.post(
         Uri.parse('${_authService!.baseUrl}/api/orders/create'),
         headers: {

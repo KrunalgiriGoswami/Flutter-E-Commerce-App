@@ -6,6 +6,7 @@ class Order {
   final String status;
   final ShippingAddress shippingAddress;
   final List<OrderItem> items;
+  final List<StatusHistory> statusHistory;
 
   Order({
     this.id,
@@ -15,6 +16,7 @@ class Order {
     this.status = 'Pending',
     required this.shippingAddress,
     required this.items,
+    required this.statusHistory,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -23,40 +25,35 @@ class Order {
       userId: json['userId'] as int,
       totalAmount: (json['totalPrice'] as num).toDouble(),
       createdAt: DateTime.parse(json['createdAt'] as String),
-      status: 'Pending', // Backend doesn't return status; set default
-      shippingAddress:
-          ShippingAddress.dummy(), // Backend doesn't return shipping address; use dummy
+      status: json['status'] as String? ?? 'ORDER_PLACED',
+      shippingAddress: ShippingAddress.fromJson(
+        json['shippingAddress'] as Map<String, dynamic>? ?? {},
+      ),
       items:
-          (json['items'] as List<dynamic>)
+          (json['items'] as List<dynamic>? ?? [])
               .map((item) => OrderItem.fromJson(item as Map<String, dynamic>))
+              .toList(),
+      statusHistory:
+          (json['statusHistory'] as List<dynamic>? ?? [])
+              .map(
+                (history) =>
+                    StatusHistory.fromJson(history as Map<String, dynamic>),
+              )
               .toList(),
     );
   }
 }
 
-class OrderItem {
-  final int? id;
-  final int productId;
-  final String name;
-  final double price;
-  final int quantity;
+class StatusHistory {
+  final String status;
+  final DateTime timestamp;
 
-  OrderItem({
-    this.id,
-    required this.productId,
-    this.name = 'Unknown Product',
-    required this.price,
-    required this.quantity,
-  });
+  StatusHistory({required this.status, required this.timestamp});
 
-  factory OrderItem.fromJson(Map<String, dynamic> json) {
-    return OrderItem(
-      id: json['id'] as int?,
-      productId: json['productId'] as int,
-      name:
-          'Product ${json['productId']}', // Backend doesn't return name; use placeholder
-      price: (json['price'] as num).toDouble(),
-      quantity: json['quantity'] as int,
+  factory StatusHistory.fromJson(Map<String, dynamic> json) {
+    return StatusHistory(
+      status: json['status'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
     );
   }
 }
@@ -76,13 +73,42 @@ class ShippingAddress {
     required this.country,
   });
 
-  factory ShippingAddress.dummy() {
+  factory ShippingAddress.fromJson(Map<String, dynamic> json) {
     return ShippingAddress(
-      street: 'N/A',
-      city: 'N/A',
-      state: 'N/A',
-      postalCode: 'N/A',
-      country: 'N/A',
+      street: json['street'] as String? ?? 'N/A',
+      city: json['city'] as String? ?? 'N/A',
+      state: json['state'] as String? ?? 'N/A',
+      postalCode: json['postalCode'] as String? ?? 'N/A',
+      country: json['country'] as String? ?? 'N/A',
+    );
+  }
+}
+
+class OrderItem {
+  final int? id;
+  final int productId;
+  final String name;
+  final double price;
+  final int quantity;
+  final String? imageUrl; // New field
+
+  OrderItem({
+    this.id,
+    required this.productId,
+    this.name = 'Unknown Product',
+    required this.price,
+    required this.quantity,
+    this.imageUrl,
+  });
+
+  factory OrderItem.fromJson(Map<String, dynamic> json) {
+    return OrderItem(
+      id: json['id'] as int?,
+      productId: json['productId'] as int,
+      name: json['name'] as String? ?? 'Product ${json['productId']}',
+      price: (json['price'] as num).toDouble(),
+      quantity: json['quantity'] as int,
+      imageUrl: json['imageUrl'] as String?,
     );
   }
 }

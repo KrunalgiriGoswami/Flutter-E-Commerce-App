@@ -5,7 +5,6 @@ import '../models/product.dart';
 import '../providers/address_provider.dart';
 import 'address_management_screen.dart';
 import 'success_screen.dart';
-
 import '../services/order_service.dart';
 import '../services/auth_service.dart';
 
@@ -480,16 +479,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             if (isBuyNow) {
                               print('Performing single product checkout...');
                               await cartProvider.checkoutSingleProduct(
+                                context,
                                 widget.singleProduct!,
                                 widget.singleQuantity!,
                               );
                             } else {
                               print('Performing cart checkout...');
-                              await cartProvider.checkout();
+                              await cartProvider.checkout(context);
                             }
                             print('Checkout completed successfully.');
 
-                            // Attempt to fetch the latest order
                             print(
                               'Fetching user orders with token: ${authService.token}',
                             );
